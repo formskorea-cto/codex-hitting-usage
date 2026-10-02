@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import sys
 import unicodedata
 from collections import defaultdict
@@ -276,16 +277,48 @@ def write_csv(path, rows):
             writer.writerow({key: "" if value is None else safe_cell(value) for key, value in row.items()})
 
 
+def cell_width(char):
+    if unicodedata.category(char) in ("Mn", "Me", "Cf"):
+        return 0
+    return 2 if unicodedata.east_asian_width(char) in "WF" else 1
+
+
+def display_width(text):
+    return sum(cell_width(char) for char in text)
+
+
+def terminal_width():
+    return max(2, shutil.get_terminal_size(fallback=(80, 24)).columns)
+
+
+def print_text(text, width):
+    for line in str(text).split("\n"):
+        line = label(line)
+        while display_width(line) > width:
+            size, end = 0, 0
+            for char in line:
+                if size + cell_width(char) > width:
+                    break
+                size += cell_width(char)
+                end += 1
+            space = line.rfind(" ", 0, end + 1)
+            if space > 0:
+                end = space
+            print(line[:end].rstrip())
+            line = line[end:].lstrip()
+        print(line)
+
+
 def label(text, width=None):
     text = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", str(text))
     if width is None:
         return text
-    full_width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
+    full_width = display_width(text)
     if full_width <= width:
         return text + " " * (width - full_width)
     result, size = "", 0
     for char in text:
-        char_width = 2 if unicodedata.east_asian_width(char) in "WF" else 1
+        char_width = cell_width(char)
         if size + char_width > width - 1:
             return result + "…" + " " * (width - size - 1)
         size += char_width
@@ -293,7 +326,12 @@ def label(text, width=None):
     return result + " " * (width - size)
 
 
-def print_table(rows, limit):
+def format_count(value):
+    return f"{value:,}" if value is not None else "unknown"
+
+
+def print_table(rows, limit, width=None):
+    width = terminal_width() if width is None else width
     is_period = any(r["period"] for r in rows)
     eligible = [r for r in rows if r["period"] != "Unmeasured"] if is_period else rows
     if is_period:
@@ -301,56 +339,117 @@ def print_table(rows, limit):
     else:
         visible = eligible[:limit or None]
     kind = "periods" if is_period else "turns" if any(r["turn_id"] for r in rows) else "chats"
-    print(f"\nToken usage | Showing {len(visible)} of {len(eligible)} {kind}")
-    print("All token counts are exact. Cache hit is a token percentage.")
+    print_text(f"\nToken usage | Showing {len(visible)} of {len(eligible)} {kind}", width)
+    print_text("All token counts are exact. Cache hit is a token percentage.", width)
     headers = ("Input tokens", "Cached input", "Cache hit %", "Output tokens", "Total tokens")
-    widths = (13, 13, 11, 13, 13)
-    print(" | ".join(f"{name:>{width}}" for name, width in zip(headers, widths)))
-    divider = "-" * (sum(widths) + 12)
-    print(divider)
+    divider = "-" * width
     for index, row in enumerate(visible, 1):
-        def number(field):
-            value = row[field]
-            return f"{value:,}" if value is not None else "unknown"
-        name = f"Period: {row['period']} | {row['title']}" if is_period else f"Chat: {row['title']}"
-        print(f"[{index}] {label(name)}")
-        if row["thread_id"] != "ALL":
-            print(f"Chat ID: {label(row['thread_id'])}")
-        if row["turn_id"]:
-            print(f"Turn ID: {label(row['turn_id'])}")
-        percent = f"{row['cache_hit_percent']:.1f}%" if row["cache_hit_percent"] is not None else "unknown"
-        values = (number("input_tokens"), number("cached_input_tokens"), percent,
-                  number("output_tokens"), number("total_tokens"))
-        print(" | ".join(f"{value:>{width}}" for value, width in zip(values, widths)))
-        print(f"Model requests: {number('calls')} | Subagents: {number('subagents')}")
-        if row["unmeasured_sessions"]:
-            print(f"Unmeasured sessions in this row: {row['unmeasured_sessions']}")
         print(divider)
-    print(f"\nUnmeasured sessions: {sum(r['unmeasured_sessions'] for r in rows)} (all matching rows)")
-    print("Input tokens include cached input. Cache hit % = cached input / input x 100.")
-    print("Output tokens include reasoning. Total tokens = input + output.")
-    print("Model requests count recorded responses, including subagents, not user messages.")
-    print("Subagents count agents with recorded usage. Unmeasured sessions are excluded.")
-    print("Unknown (or ? in charts) means no usable measurement, not zero.")
-    print("These logs cannot determine quota deductions or actual charges.")
+        name = f"Period: {row['period']} | {row['title']}" if is_period else f"Chat: {row['title']}"
+        print_text(f"[{index}] {name}", width)
+        if row["thread_id"] != "ALL":
+            print_text(f"Chat ID: {row['thread_id']}", width)
+        if row["turn_id"]:
+            print_text(f"Turn ID: {row['turn_id']}", width)
+        percent = f"{row['cache_hit_percent']:.1f}%" if row["cache_hit_percent"] is not None else "unknown"
+        values = (format_count(row["input_tokens"]), format_count(row["cached_input_tokens"]), percent,
+                  format_count(row["output_tokens"]), format_count(row["total_tokens"]))
+        widths = [max(len(header), len(value)) for header, value in zip(headers, values)]
+        start = 0
+        while start < len(headers):
+            end = start + 1
+            if widths[start] > width:
+                print_text(f"{headers[start]}: {values[start]}", width)
+            else:
+                while end < len(headers) and sum(widths[start:end + 1]) + 3 * (end - start) <= width:
+                    end += 1
+                for cells in (headers, values):
+                    print(" | ".join(f"{cells[i]:>{widths[i]}}" for i in range(start, end)))
+            start = end
+        print_text(f"Model requests: {format_count(row['calls'])} | Subagents: {format_count(row['subagents'])}", width)
+        if row["unmeasured_sessions"]:
+            print_text(f"Unmeasured sessions in this row: {row['unmeasured_sessions']}", width)
+    print(divider)
+    print_text(f"\nUnmeasured sessions: {sum(r['unmeasured_sessions'] for r in rows)} (all matching rows)", width)
+    print_text("Input tokens include cached input. Cache hit % = cached input / input x 100.\n"
+               "Output tokens include reasoning. Total tokens = input + output.\n"
+               "Model requests count recorded responses, including subagents, not user messages.\n"
+               "Subagents count agents with recorded usage. Unmeasured sessions are excluded.\n"
+               "Unknown (or ? in charts) means no usable measurement, not zero.\n"
+               "These logs cannot determine quota deductions or actual charges.", width)
 
 
-def print_chart(rows, limit):
+def print_chart(rows, limit, width=None):
+    width = terminal_width() if width is None else width
     measured = [r for r in rows if r["total_tokens"] is not None]
     if limit:
         measured = measured[-limit:] if any(r["period"] for r in rows) else measured[:limit]
     if not measured:
-        print("\nNo usage records available for a chart.")
+        print_text("\nNo usage records available for a chart.", width)
         return
     largest = max(r["total_tokens"] for r in measured)
-    print("\nTotal token chart (# = 1/24 of the largest displayed total)")
-    for row in measured:
+    suffixes = [f" {r['total_tokens']:,}  cache " +
+                (f"{r['cache_hit_percent']:.1f}%" if r["cache_hit_percent"] is not None else "?")
+                for r in measured]
+    available = width - max(len(suffix) for suffix in suffixes) - 3
+    inline = available >= 16
+    name_width = min(24, available // 2) if inline else width
+    bar_width = min(24, available - name_width) if inline else max(0, min(24, width - 2))
+    print_text(f"\nTotal token chart (bars scale to the largest displayed total; up to {bar_width} #)", width)
+    for row, suffix in zip(measured, suffixes):
         name = row["period"] or row["title"]
         if row["turn_id"]:
             name = label(name, 13).rstrip() + "/" + row["turn_id"][:8]
-        width = max(1, round(row["total_tokens"] * 24 / largest)) if largest and row["total_tokens"] else 0
-        cached = f"{row['cache_hit_percent']:.1f}%" if row["cache_hit_percent"] is not None else "?"
-        print(f"{label(name, 24)} |{'#' * width:<24}| {row['total_tokens']:>12,}  cache {cached}")
+        filled = max(1, round(row["total_tokens"] * bar_width / largest)) if bar_width and largest and row["total_tokens"] else 0
+        bar = f"|{'#' * filled:<{bar_width}}|"
+        if inline:
+            print(f"{label(name, name_width)} {bar}{suffix}")
+        else:
+            print_text(name, width)
+            print(bar)
+            print_text(f"Total tokens:{suffix}", width)
+
+
+def print_tips(rows, width=None):
+    width = terminal_width() if width is None else width
+    print_text("\nRecommended tips | All matching rows, before --limit\n"
+               "Heuristic token advice; no billing savings or wasted work can be proven.", width)
+    measured = [r for r in rows if r["total_tokens"] is not None]
+    if not measured:
+        print_text("No usable token records. Collect matching session logs before drawing conclusions.", width)
+        return
+    inp = sum(r["input_tokens"] for r in measured)
+    out = sum(r["output_tokens"] for r in measured)
+    cache_known = all(r["cached_input_tokens"] is not None for r in measured)
+    if inp and cache_known:
+        cached = sum(r["cached_input_tokens"] for r in measured)
+        rate = cached * 100 / inp
+        print_text(f"- Cache reuse: {rate:.1f}% of input tokens ({cached:,} / {inp:,}).", width)
+        if rate >= 80:
+            print_text("  Most input was reused. Preserve useful context for related work; prioritize removing unnecessary context and requests over chasing a higher hit rate.", width)
+        else:
+            print_text("  Review reusable instructions and references. Keep stable content unchanged and append new details. New tasks or short prompts can naturally have low cache reuse; the logs do not identify the cause.", width)
+        print_text("  Staying in one chat does not guarantee cache hits. Cached tokens can still incur usage or charges; the hit rate is not a cost-saving percentage.", width)
+    elif inp:
+        print_text("- Cache reuse is unknown because some cache counts are missing. Do not treat missing counts as zero or infer savings from a partial cache rate.", width)
+    if inp:
+        print_text(f"- Input context: {inp:,} recorded tokens. Use file searches and relevant snippets instead of repeated full-file or log dumps. Keep AGENTS.md focused.", width)
+        if all(r["calls"] is not None for r in measured):
+            calls = sum(r["calls"] for r in measured)
+            if calls:
+                average = inp / calls
+                print_text(f"  Average input per model request: {average:,.0f} tokens (not current chat length).", width)
+                if average >= 32000:
+                    print_text("  Large average context: consider a new chat with a concise handoff for unrelated work. Compare totals afterward; a fresh chat may lose cache reuse.", width)
+    if out:
+        print_text(f"- Output: {out:,} tokens, including reasoning. Ask for the required answer format and length, and avoid repeated code dumps. A short final answer does not guarantee low reasoning usage.", width)
+    agent_rows = sum(r["subagents"] > 0 for r in measured)
+    if agent_rows:
+        print_text(f"- Subagents appear in {agent_rows} of {len(measured)} measured rows. Give them independent scopes and reuse findings to avoid duplicate searches. Counts alone do not show unnecessary work.", width)
+    if any(r["unmeasured_sessions"] for r in rows):
+        print_text("- Coverage is incomplete: unmeasured sessions are excluded from these tips.", width)
+    print_text("Actual charges and subscription allowance deductions require billing/account data.\n"
+               "Sources: OpenAI prompt caching and Codex pricing guidance (see README).", width)
 
 
 def default_since(period):
@@ -384,24 +483,26 @@ def main(argv=None):
     if args.limit < 0:
         parser.error("--limit must be 0 or greater.")
     since = None if args.all_time else args.since or default_since(args.period)
+    width = terminal_width()
     try:
         paths = find_logs(args.codex_home, args.logs)
         if since:
             paths = [p for p in paths if datetime.fromtimestamp(p.stat().st_mtime).date() >= since]
-        print(f"Scanning {len(paths)} local log files | {'All time' if since is None else 'Since ' + str(since)}")
+        print_text(f"Scanning {len(paths)} local log files | {'All time' if since is None else 'Since ' + str(since)}", width)
         # ponytail: scan selected files; add an incremental index if repeated scans become too slow.
         rows, warnings = summarize(paths, read_titles(args.codex_home), since, args.thread, args.by_turn, args.period)
         if not rows:
-            print("No matching records. For remote chats, copy their JSONL logs locally and use --logs.")
+            print_text("No matching records. For remote chats, copy their JSONL logs locally and use --logs.", width)
             return 1
-        print_table(rows, args.limit)
+        print_table(rows, args.limit, width)
         if args.chart:
-            print_chart(rows, args.limit)
+            print_chart(rows, args.limit, width)
         if args.csv:
             write_csv(args.csv, rows)
-            print(f"CSV: {args.csv.resolve()}")
+            print_text(f"CSV: {args.csv.resolve()}", width)
         if warnings:
-            print("Log processing:", ", ".join(f"{key}={value}" for key, value in warnings.items()))
+            print_text("Log processing: " + ", ".join(f"{key}={value}" for key, value in warnings.items()), width)
+        print_tips(rows, width)
     except (OSError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1

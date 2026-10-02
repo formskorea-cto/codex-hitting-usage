@@ -117,15 +117,27 @@ Raw logs can contain conversations and source code. CSV exports can contain chat
 
 Every numeric token column is a token count, not a price or an allowance percentage.
 
-The terminal table uses five token columns, with a separate labeled line for each chat or period. Full chat titles and IDs identify each row; turn IDs appear with `--by-turn`. Request and subagent counts appear below the token values. `Showing X of Y` reports the display limit, while the unmeasured-session footer covers all matching rows. The token header fits within 80 columns for ordinary counts.
+The terminal table detects the output terminal's width. Token columns are grouped into as many lines as needed; titles, IDs, explanations, and charts also fit that width. All token counts remain exact. Full chat titles and IDs identify each row; turn IDs appear with `--by-turn`. Request and subagent counts appear below the token values. `Showing X of Y` reports the display limit, while the unmeasured-session footer covers all matching rows.
+
+Redirected output defaults to 80 columns. Python's standard terminal detection also honors `COLUMNS`, which is useful for exports or a custom width:
+
+```sh
+COLUMNS=40 sh usage.sh --period day
+```
+
+```bat
+set COLUMNS=40
+usage.cmd --period day
+set COLUMNS=
+```
 
 ```text
 Token usage | Showing 1 of 1 periods
 All token counts are exact. Cache hit is a token percentage.
- Input tokens |  Cached input | Cache hit % | Output tokens |  Total tokens
 ---------------------------------------------------------------------------
 [1] Period: 2026-10-02 | All chats
-        1,000 |           800 |       80.0% |           100 |         1,100
+Input tokens | Cached input | Cache hit % | Output tokens | Total tokens
+       1,000 |          800 |       80.0% |           100 |        1,100
 Model requests: 2 | Subagents: 1
 ---------------------------------------------------------------------------
 ```
@@ -144,6 +156,20 @@ Model requests: 2 | Subagents: 1
 A chat row combines that chat's recorded work and its subagents. A period row combines all selected chats for that day, ISO week, or month. Use `--thread` to limit period rows to one chat, or `--by-turn` to separate user task turns.
 
 CSV exports retain exact integer counts and full chat/turn IDs. A blank value means unknown, not zero.
+
+## Recommended tips
+
+Every successful report ends with English explanations based on **all matching rows before `--limit`**, including recorded subagent usage. Tips are generated locally from the statistics; they do not call an AI service or upload logs.
+
+- Cache reuse uses total cached input / total input, not an average of row percentages. If any measured row lacks cache counts, the overall rate is unknown. Missing sessions are excluded and flagged.
+- At least 80% reuse prompts advice to preserve useful context and focus on unnecessary context or requests. Otherwise, the advice explains stable instructions and references. Neither branch diagnoses the cause of cache misses or equates the hit rate with money saved.
+- Input totals prompt advice about relevant file snippets and focused `AGENTS.md` instructions. When request counts are available, an average input of at least 32,000 tokens prompts a suggestion to consider a concise handoff for unrelated work. This is an average per model request, including subagents, not the current context length.
+- Output advice covers concise answers and avoiding repeated code dumps. Output includes reasoning; shorter visible replies do not necessarily reduce reasoning usage.
+- Subagent advice encourages distinct scopes and reusing findings. The report counts rows containing subagents, because one agent can appear in several periods or turns. Agent counts cannot establish wasted work.
+
+The 80% and 32,000-token thresholds are practical local heuristics, not OpenAI limits or pricing rules. These logs cannot prove monetary savings or subscription allowance deductions. Continuing one chat can preserve shared context, but does not guarantee cache hits. Compare recorded totals for comparable work after making changes.
+
+Guidance: [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) explains shared-prefix reuse; [Codex pricing and usage advice](https://learn.chatgpt.com/docs/pricing) recommends focused source material and output.
 
 ## Calculations and limitations
 
@@ -167,7 +193,7 @@ Official references: [Prompt caching](https://developers.openai.com/api/docs/gui
 python -B test_codex_usage.py
 ```
 
-The checks cover duplicate and revised responses, copied history, subagent and turn totals, global and chat-specific calendar aggregation, ISO week-year boundaries, charts, date filters, legacy snapshots, missing or invalid counts, and CSV formula escaping.
+The checks cover duplicate and revised responses, copied history, subagent and turn totals, calendar aggregation, ISO week-year boundaries, terminal widths from 2 to 120 columns, Korean titles and long IDs, huge exact counts, adaptive charts, weighted and incomplete-cache tips, tips before the display limit, legacy snapshots, CSV escaping, the CLI, and the sh launcher.
 
 When `sh` is available, they also check shell syntax, paths containing spaces, execution from another working directory, option forwarding, and CSV creation. Shell-launcher checks are skipped when no supported `sh` installation is found.
 
