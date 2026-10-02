@@ -125,7 +125,7 @@ Raw logs can contain conversations and source code. CSV exports can contain chat
 - Log formats may change between Codex versions. Active sessions can have records that have not arrived yet. Recorded token counts are not a final bill.
 - **Exact subscription allowance deductions, credit charges, and API bills cannot be established from these token logs alone.** Account-wide usage changes can include other chats and are not attributed to one chat.
 
-Chart bars scale to the largest displayed total, with the token cache hit rate shown alongside each bar. CSV files use UTF-8 with a BOM for Excel compatibility, and formula-triggering title prefixes are escaped. Terminal labels currently remain in Korean.
+Chart bars scale to the largest displayed total, with the token cache hit rate shown alongside each bar. CSV files use UTF-8 with a BOM for Excel compatibility, and formula-triggering title prefixes are escaped. Terminal labels and help messages are in English. Chat titles are displayed as recorded.
 
 Official references: [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching), [Observability and usage](https://developers.openai.com/api/docs/guides/agents-api/observability), [Session log locations](https://learn.chatgpt.com/docs/reference/troubleshooting).
 

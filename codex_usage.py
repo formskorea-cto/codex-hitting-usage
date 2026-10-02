@@ -81,7 +81,7 @@ def read_log(path, warnings):
                                   "model": model, "turn": "unknown"}
     except OSError as error:
         warnings["unreadable_files"] += 1
-        print(f"읽기 실패: {path.name}: {error.strerror}", file=sys.stderr)
+        print(f"Cannot read {path.name}: {error.strerror}", file=sys.stderr)
     if not meta or not meta.get("id"):
         return None
     owner = meta["id"]
@@ -104,7 +104,7 @@ def find_logs(home, extras):
         elif root.is_dir():
             paths.update(p.resolve() for p in root.rglob("*.jsonl"))
         elif root in extras:
-            raise ValueError(f"로그 경로가 없습니다: {root}")
+            raise ValueError(f"Log path does not exist: {root}")
     return sorted(paths)
 
 
@@ -125,7 +125,7 @@ def read_titles(home):
 
 def period_key(when, period):
     if when is None:
-        return "미측정"
+        return "Unmeasured"
     day = when.date()
     if period == "day":
         return day.isoformat()
@@ -158,7 +158,7 @@ def summarize(paths, titles, since=None, thread=None, by_turn=False, period=None
         owner = (thread or "ALL") if period else root
         key = (owner, bucket if period else turn if by_turn else "")
         if key not in groups:
-            groups[key] = {"thread_id": owner, "title": "전체 채팅" if owner == "ALL" else titles.get(root, root[:13]),
+            groups[key] = {"thread_id": owner, "title": "All chats" if owner == "ALL" else titles.get(root, root[:13]),
                            "turn_id": turn if by_turn else "", "period": bucket, "calls": 0,
                            "input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0,
                            "reasoning_tokens": 0, "cache_write_tokens": 0,
@@ -292,10 +292,10 @@ def label(text, width):
 
 
 def print_table(rows, limit):
-    heading = "기간" if any(r["period"] for r in rows) else "채팅"
-    print(f"{heading:<22} {'호출':>6} {'입력':>12} {'캐시 입력':>12} {'캐시%':>7} {'출력':>10} {'합계':>12} {'하위':>4}")
+    heading = "Period" if any(r["period"] for r in rows) else "Chat"
+    print(f"{heading:<26} {'Calls':>6} {'Input':>12} {'Cached':>12} {'Cache%':>7} {'Output':>10} {'Total':>12} {'Sub':>4}")
     if any(r["period"] for r in rows):
-        dated = [r for r in rows if r["period"] != "미측정"]
+        dated = [r for r in rows if r["period"] != "Unmeasured"]
         visible = dated[-limit:] if limit else dated
     else:
         visible = rows[:limit or None]
@@ -309,10 +309,10 @@ def print_table(rows, limit):
         print(f"{label(name, 26)} {number('calls'):>6} {number('input_tokens'):>12} "
               f"{number('cached_input_tokens'):>12} {percent:>7} {number('output_tokens'):>10} "
               f"{number('total_tokens'):>12} {row['subagents']:>4}")
-    print(f"\n집계 행 {len(rows)}개 · 미측정 세션 {sum(r['unmeasured_sessions'] for r in rows)}개")
-    print("캐시% = 캐시 입력 / 입력 × 100. 합계 = 입력 + 출력(추론 포함); 캐시는 입력에 포함됩니다.")
-    print("수치는 기록된 사용량입니다. 미측정 세션은 합계에서 제외되며, 하위는 측정된 에이전트 수입니다.")
-    print("구독 한도 차감률·실제 청구액은 이 토큰 기록만으로 확정할 수 없습니다. ? = 기록 없음.")
+    print(f"\nRows: {len(rows)} | Unmeasured sessions: {sum(r['unmeasured_sessions'] for r in rows)}")
+    print("Cache% = cached input / input x 100. Total = input + output (includes reasoning). Cache is included in input.")
+    print("Totals cover recorded usage; unmeasured sessions are excluded. Sub = measured subagents.")
+    print("Quota deductions and actual charges cannot be determined from these logs. ? = unknown.")
 
 
 def print_chart(rows, limit):
@@ -320,10 +320,10 @@ def print_chart(rows, limit):
     if limit:
         measured = measured[-limit:] if any(r["period"] for r in rows) else measured[:limit]
     if not measured:
-        print("\n차트에 표시할 사용량 기록이 없습니다.")
+        print("\nNo usage records available for a chart.")
         return
     largest = max(r["total_tokens"] for r in measured)
-    print("\n총 토큰 차트 (# = 표시된 최댓값의 1/24)")
+    print("\nTotal token chart (# = 1/24 of the largest displayed total)")
     for row in measured:
         name = row["period"] or row["title"]
         if row["turn_id"]:
@@ -348,31 +348,31 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
-    parser.add_argument("--logs", type=Path, action="append", default=[], help="추가 JSONL 파일 또는 폴더 (원격에서 복사한 로그 등)")
+    parser.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")), help="Codex home directory (default: CODEX_HOME or ~/.codex)")
+    parser.add_argument("--logs", type=Path, action="append", default=[], help="Additional JSONL file or directory, including copied remote logs; may be repeated")
     dates = parser.add_mutually_exclusive_group()
-    dates.add_argument("--since", type=date.fromisoformat, help="이 날짜 이후의 응답 사용량 (컴퓨터 현지 날짜)")
-    dates.add_argument("--all-time", action="store_true", help="전체 기간, 구형 로그의 누적 스냅샷 포함")
-    parser.add_argument("--thread", help="채팅 UUID. 루트 UUID를 지정하면 하위 에이전트 포함")
+    dates.add_argument("--since", type=date.fromisoformat, help="Include responses on or after this local date (YYYY-MM-DD)")
+    dates.add_argument("--all-time", action="store_true", help="All available dates, including legacy lifetime snapshots")
+    parser.add_argument("--thread", help="Chat UUID; selecting a root UUID includes recorded subagents")
     views = parser.add_mutually_exclusive_group()
-    views.add_argument("--by-turn", action="store_true", help="사용자 작업 턴별로 구분")
-    views.add_argument("--period", choices=("day", "week", "month"), help="일별/주별(월요일 시작)/월별. --thread 미지정 시 전체 채팅 합산")
-    parser.add_argument("--chart", action="store_true", help="CMD 호환 ASCII 막대 차트 표시")
-    parser.add_argument("--csv", type=Path, help="표시 제한과 무관하게 모든 결과를 CSV로 저장")
-    parser.add_argument("--limit", type=int, default=20, help="표에서 표시할 행 수 (0 = 전체)")
+    views.add_argument("--by-turn", action="store_true", help="Group by user task turn")
+    views.add_argument("--period", choices=("day", "week", "month"), help="Group by day, ISO week (Monday start), or month; combines all chats unless --thread is set")
+    parser.add_argument("--chart", action="store_true", help="Display a CMD-compatible ASCII bar chart")
+    parser.add_argument("--csv", type=Path, help="Export all matching rows to CSV, regardless of the display limit")
+    parser.add_argument("--limit", type=int, default=20, help="Number of displayed rows (default: 20; 0 = all)")
     args = parser.parse_args(argv)
     if args.limit < 0:
-        parser.error("--limit은 0 이상이어야 합니다.")
+        parser.error("--limit must be 0 or greater.")
     since = None if args.all_time else args.since or default_since(args.period)
     try:
         paths = find_logs(args.codex_home, args.logs)
         if since:
             paths = [p for p in paths if datetime.fromtimestamp(p.stat().st_mtime).date() >= since]
-        print(f"로컬 로그 {len(paths)}개 분석 · {'전체 기간' if since is None else str(since) + ' 이후'}")
+        print(f"Scanning {len(paths)} local log files | {'All time' if since is None else 'Since ' + str(since)}")
         # ponytail: scan selected files; add an incremental index if repeated scans become too slow.
         rows, warnings = summarize(paths, read_titles(args.codex_home), since, args.thread, args.by_turn, args.period)
         if not rows:
-            print("해당 기록이 없습니다. 원격 채팅은 원격 JSONL을 복사한 뒤 --logs로 지정하세요.")
+            print("No matching records. For remote chats, copy their JSONL logs locally and use --logs.")
             return 1
         print_table(rows, args.limit)
         if args.chart:
@@ -381,9 +381,9 @@ def main(argv=None):
             write_csv(args.csv, rows)
             print(f"CSV: {args.csv.resolve()}")
         if warnings:
-            print("기록 처리:", ", ".join(f"{key}={value}" for key, value in warnings.items()))
+            print("Log processing:", ", ".join(f"{key}={value}" for key, value in warnings.items()))
     except (OSError, ValueError) as error:
-        print(f"오류: {error}", file=sys.stderr)
+        print(f"Error: {error}", file=sys.stderr)
         return 1
     return 0
 
