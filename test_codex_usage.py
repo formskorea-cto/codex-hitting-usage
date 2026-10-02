@@ -99,13 +99,27 @@ def run():
         assert "2026-10-02" in table.getvalue() and "2026-10-03" in table.getvalue()
         assert "2026-09-30" not in table.getvalue()
         assert "Unmeasured sessions: 1" in table.getvalue()
-        assert all(header in table.getvalue() for header in ("Period", "Calls", "Input", "Cached", "Output", "Total"))
+        assert all(header in table.getvalue() for header in ("Period:", "Model requests:",
+            "Input tokens", "Cached input", "Cache hit %", "Output tokens", "Total tokens", "Subagents:"))
+        assert "Showing 2 of 3 periods" in table.getvalue()
+        assert all(len(line) <= 80 for line in table.getvalue().splitlines())
         assert not any('\uac00' <= c <= '\ud7a3' for c in table.getvalue())
         unknown = record("root", "missing-cache", 50, None, 5)
         missing = save("missing", [root_meta, unknown])
         rows, _ = summarize([missing], {})
         assert rows[0]["cache_hit_percent"] is None and rows[0]["unknown_cache_calls"] == 1
         assert rows[0]["cached_input_tokens"] is None
+        long_title = "A complete chat title that should remain identifiable in the results"
+        rows[0]["title"] = long_title
+        with redirect_stdout(io.StringIO()) as table:
+            print_table(rows, 0)
+        assert long_title in table.getvalue() and "Chat ID: root" in table.getvalue()
+        assert "unknown" in table.getvalue() and "Showing 1 of 1 chats" in table.getvalue()
+        rows[0]["turn_id"] = "12345678-full-turn-identifier"
+        with redirect_stdout(io.StringIO()) as table:
+            print_table(rows, 0)
+        assert "Turn ID: 12345678-full-turn-identifier" in table.getvalue()
+        assert "Showing 1 of 1 turns" in table.getvalue()
 
         invalid = record("root", "invalid", 10, 50, 5)
         bad = save("bad", [root_meta, invalid])

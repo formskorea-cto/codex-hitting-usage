@@ -113,13 +113,45 @@ If you copied the original `.codex` directory structure and its `session_index.j
 
 Raw logs can contain conversations and source code. CSV exports can contain chat titles; review them before sharing.
 
+## Reading the results
+
+Every numeric token column is a token count, not a price or an allowance percentage.
+
+The terminal table uses five token columns, with a separate labeled line for each chat or period. Full chat titles and IDs identify each row; turn IDs appear with `--by-turn`. Request and subagent counts appear below the token values. `Showing X of Y` reports the display limit, while the unmeasured-session footer covers all matching rows. The token header fits within 80 columns for ordinary counts.
+
+```text
+Token usage | Showing 1 of 1 periods
+All token counts are exact. Cache hit is a token percentage.
+ Input tokens |  Cached input | Cache hit % | Output tokens |  Total tokens
+---------------------------------------------------------------------------
+[1] Period: 2026-10-02 | All chats
+        1,000 |           800 |       80.0% |           100 |         1,100
+Model requests: 2 | Subagents: 1
+---------------------------------------------------------------------------
+```
+
+| Metric | Meaning |
+| --- | --- |
+| Input tokens | All input processed by the model, including cached input |
+| Cached input | Input tokens reused from the prompt cache |
+| Cache hit % | Cached input divided by input, shown as a percentage |
+| Output tokens | Generated output, including reasoning and tool-call arguments |
+| Total tokens | Input tokens plus output tokens; cached input is not added again |
+| Model requests | Recorded model responses, including subagent responses; not user messages |
+| Subagents | Distinct subagents with recorded usage; excludes the root agent |
+| Unmeasured sessions | Sessions without usable usage records; excluded from token totals |
+
+A chat row combines that chat's recorded work and its subagents. A period row combines all selected chats for that day, ISO week, or month. Use `--thread` to limit period rows to one chat, or `--by-turn` to separate user task turns.
+
+CSV exports retain exact integer counts and full chat/turn IDs. A blank value means unknown, not zero.
+
 ## Calculations and limitations
 
 - **Token cache hit rate** = recorded cached input tokens / recorded input tokens x 100. This is a token-weighted ratio, not the percentage of requests that hit the cache.
 - **Total tokens** = input + output. Cached reads and writes are subsets of input; reasoning is a subset of output. They are not added again.
 - Current `token_usage_record.usage` entries are summed per response. Duplicate `response_id` entries are counted once, preferring the latest timestamp. Copied parent history is excluded using the owning `thread_id`.
 - Subagents are linked to their parent or root chat. Automatic review agents are included when they have token records. The tool does not determine whether those tokens consume paid allowance.
-- Sessions without usable usage records are excluded from totals and reported as unmeasured. Missing cache values display `?`, not 0%. Blank CSV fields mean unknown values.
+- Sessions without usable usage records are excluded from totals and reported as unmeasured. Missing values display `unknown` in tables and `?` in charts, not zero. Blank CSV fields mean unknown values.
 - Legacy logs containing only `token_count` are supported as latest lifetime snapshots with `--all-time`. They cannot establish request counts or period-specific usage. Legacy subagent and explicit fork snapshots are excluded to avoid counting inherited usage.
 - Period totals include only responses with usable timestamps and usage records. Legacy or undated records cannot be allocated to calendar periods and remain unmeasured.
 - Log formats may change between Codex versions. Active sessions can have records that have not arrived yet. Recorded token counts are not a final bill.

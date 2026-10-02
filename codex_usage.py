@@ -276,8 +276,10 @@ def write_csv(path, rows):
             writer.writerow({key: "" if value is None else safe_cell(value) for key, value in row.items()})
 
 
-def label(text, width):
+def label(text, width=None):
     text = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", str(text))
+    if width is None:
+        return text
     full_width = sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text)
     if full_width <= width:
         return text + " " * (width - full_width)
@@ -292,27 +294,45 @@ def label(text, width):
 
 
 def print_table(rows, limit):
-    heading = "Period" if any(r["period"] for r in rows) else "Chat"
-    print(f"{heading:<26} {'Calls':>6} {'Input':>12} {'Cached':>12} {'Cache%':>7} {'Output':>10} {'Total':>12} {'Sub':>4}")
-    if any(r["period"] for r in rows):
-        dated = [r for r in rows if r["period"] != "Unmeasured"]
-        visible = dated[-limit:] if limit else dated
+    is_period = any(r["period"] for r in rows)
+    eligible = [r for r in rows if r["period"] != "Unmeasured"] if is_period else rows
+    if is_period:
+        visible = eligible[-limit:] if limit else eligible
     else:
-        visible = rows[:limit or None]
-    for row in visible:
+        visible = eligible[:limit or None]
+    kind = "periods" if is_period else "turns" if any(r["turn_id"] for r in rows) else "chats"
+    print(f"\nToken usage | Showing {len(visible)} of {len(eligible)} {kind}")
+    print("All token counts are exact. Cache hit is a token percentage.")
+    headers = ("Input tokens", "Cached input", "Cache hit %", "Output tokens", "Total tokens")
+    widths = (13, 13, 11, 13, 13)
+    print(" | ".join(f"{name:>{width}}" for name, width in zip(headers, widths)))
+    divider = "-" * (sum(widths) + 12)
+    print(divider)
+    for index, row in enumerate(visible, 1):
         def number(field):
             value = row[field]
-            return f"{value:,}" if value is not None else "?"
-        percent = f"{row['cache_hit_percent']:.1f}%" if row["cache_hit_percent"] is not None else "?"
-        name = row["period"] or (row["title"] if not row["turn_id"] else
-                                 label(row["title"], 15).rstrip() + "/" + row["turn_id"][:8])
-        print(f"{label(name, 26)} {number('calls'):>6} {number('input_tokens'):>12} "
-              f"{number('cached_input_tokens'):>12} {percent:>7} {number('output_tokens'):>10} "
-              f"{number('total_tokens'):>12} {row['subagents']:>4}")
-    print(f"\nRows: {len(rows)} | Unmeasured sessions: {sum(r['unmeasured_sessions'] for r in rows)}")
-    print("Cache% = cached input / input x 100. Total = input + output (includes reasoning). Cache is included in input.")
-    print("Totals cover recorded usage; unmeasured sessions are excluded. Sub = measured subagents.")
-    print("Quota deductions and actual charges cannot be determined from these logs. ? = unknown.")
+            return f"{value:,}" if value is not None else "unknown"
+        name = f"Period: {row['period']} | {row['title']}" if is_period else f"Chat: {row['title']}"
+        print(f"[{index}] {label(name)}")
+        if row["thread_id"] != "ALL":
+            print(f"Chat ID: {label(row['thread_id'])}")
+        if row["turn_id"]:
+            print(f"Turn ID: {label(row['turn_id'])}")
+        percent = f"{row['cache_hit_percent']:.1f}%" if row["cache_hit_percent"] is not None else "unknown"
+        values = (number("input_tokens"), number("cached_input_tokens"), percent,
+                  number("output_tokens"), number("total_tokens"))
+        print(" | ".join(f"{value:>{width}}" for value, width in zip(values, widths)))
+        print(f"Model requests: {number('calls')} | Subagents: {number('subagents')}")
+        if row["unmeasured_sessions"]:
+            print(f"Unmeasured sessions in this row: {row['unmeasured_sessions']}")
+        print(divider)
+    print(f"\nUnmeasured sessions: {sum(r['unmeasured_sessions'] for r in rows)} (all matching rows)")
+    print("Input tokens include cached input. Cache hit % = cached input / input x 100.")
+    print("Output tokens include reasoning. Total tokens = input + output.")
+    print("Model requests count recorded responses, including subagents, not user messages.")
+    print("Subagents count agents with recorded usage. Unmeasured sessions are excluded.")
+    print("Unknown (or ? in charts) means no usable measurement, not zero.")
+    print("These logs cannot determine quota deductions or actual charges.")
 
 
 def print_chart(rows, limit):
